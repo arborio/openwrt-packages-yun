@@ -1,13 +1,33 @@
 #!/bin/sh
 
-echo 1 > /sys/class/gpio/gpio21/value
-avrdude  -q -q -c linuxgpio -C /etc/avrdude.conf -p m32u4 -U efuse:r:/tmp/efuse:d
-read EFUSE < /tmp/efuse
-rm -f /tmp/efuse
-if [ "x$EFUSE" = "x203" ] # 203 = 0xCB
-then
-	avrdude -c linuxgpio -C /etc/avrdude.conf -p m32u4 -U lfuse:w:0xFF:m -U hfuse:w:0xD8:m -U efuse:w:0xCB:m -Uflash:w:$1:i $2
-else
-	avrdude -c linuxgpio -C /etc/avrdude.conf -p m32u4 -U lfuse:w:0xFF:m -U hfuse:w:0xD8:m -U efuse:w:0xFB:m -Uflash:w:$1:i $2
+# The Arduino IDE sends the additional params in ''.
+# Need to parse those out.
+SKETCH=$1
+IFS=" "
+set -- $2
+MCU=$1
+LOWFUSE=$2
+HIGHFUSE=$3
+EXTFUSE=$4
+BOOTLOADER=$5
+
+# Merge the bootloader with the sketch.
+/usr/bin/merge-sketch-with-bootloader-real.lua $SKETCH $BOOTLOADER
+
+
+if [ -d /sys/class/gpio/gpio1 ]; then
+  GPIO1_EXPORTED='YES'
 fi
-echo 0 > /sys/class/gpio/gpio21/value
+
+if [ ! $GPIO1_EXPORTED ]; then
+  echo 1 > /sys/class/gpio/export
+fi
+
+echo "out" > /sys/class/gpio/gpio1/direction
+echo 1 > /sys/class/gpio/gpio1/value
+avrdude -c linuxgpio -C /etc/avrdude.conf -p $MCU -U lfuse:w:$LOWFUSE:m -U hfuse:w:$HIGHFUSE:m -U efuse:w:$EXTFUSE:m -Uflash:w:$SKETCH:i
+echo 0 > /sys/class/gpio/gpio1/value
+
+if [ ! $GPIO1_EXPORTED ]; then
+  echo 1 > /sys/class/gpio/unexport
+fi
